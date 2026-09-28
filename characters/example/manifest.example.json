@@ -1,0 +1,16 @@
+{
+  "name": "我的角色",
+  "author": "你的名字",
+  "type": "single",
+  "image": "character.png",
+  "scale": 0.5,
+  "fps": 30,
+  "animations": {
+    "idle":  { "bob": 3, "sway_deg": 0, "period_ms": 2600 },
+    "wave":  { "bob": 2, "sway_deg": 7, "period_ms": 950 },
+    "jump":  { "hop": 34, "hop_period_ms": 640 },
+    "happy": { "hop": 18, "sway_deg": 9, "period_ms": 760 },
+    "sit":   { "bob": 2, "sway_deg": 0, "period_ms": 2800 }
+  },
+  "sounds": { "stand": "sounds/stand.wav", "sit": "sounds/sit.wav" }
+}

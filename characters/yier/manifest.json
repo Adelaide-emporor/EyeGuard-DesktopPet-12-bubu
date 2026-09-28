@@ -1,0 +1,34 @@
+{
+  "name": "一二",
+  "author": "EyeGuard",
+  "type": "single",
+  "image": "character.png",
+  "scale": 0.46,
+  "animations": {
+    "idle": {
+      "bob": 3,
+      "sway_deg": 0,
+      "period_ms": 2600
+    },
+    "wave": {
+      "bob": 2,
+      "sway_deg": 7,
+      "period_ms": 950
+    },
+    "jump": {
+      "hop": 36,
+      "hop_period_ms": 640
+    },
+    "happy": {
+      "hop": 18,
+      "sway_deg": 9,
+      "period_ms": 760
+    },
+    "sit": {
+      "bob": 2,
+      "sway_deg": 0,
+      "period_ms": 2800
+    }
+  },
+  "sounds": {}
+}

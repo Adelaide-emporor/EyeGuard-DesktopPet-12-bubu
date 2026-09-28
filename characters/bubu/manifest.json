@@ -1,0 +1,34 @@
+{
+  "name": "布布",
+  "author": "EyeGuard",
+  "type": "single",
+  "image": "character.png",
+  "scale": 0.24,
+  "animations": {
+    "idle": {
+      "bob": 3,
+      "sway_deg": 0,
+      "period_ms": 2600
+    },
+    "wave": {
+      "bob": 2,
+      "sway_deg": 6,
+      "period_ms": 950
+    },
+    "jump": {
+      "hop": 30,
+      "hop_period_ms": 640
+    },
+    "happy": {
+      "hop": 14,
+      "sway_deg": 8,
+      "period_ms": 760
+    },
+    "sit": {
+      "bob": 2,
+      "sway_deg": 0,
+      "period_ms": 2800
+    }
+  },
+  "sounds": {}
+}
