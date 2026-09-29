@@ -10,45 +10,47 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel,
                                QWidget)
 
 from config import MODE_FULLSCREEN, MODE_WINDOW, AppConfig
+from mask_theme import resolve_theme
 
-_BUTTON_QSS = """
-QPushButton {
-    background-color: rgba(255, 255, 255, 0.12);
-    color: #ECEFF1;
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    border-radius: 8px;
-    padding: 10px 24px;
-    font-size: 15px;
-}
-QPushButton:hover { background-color: rgba(255, 255, 255, 0.22); }
-QPushButton:pressed { background-color: rgba(255, 255, 255, 0.30); }
+def _build_qss(c: dict, fullscreen: bool) -> str:
+    """按主题配色生成遮罩样式（fullscreen=全屏遮罩 / 普通窗口）。"""
+    title_size = 34 if fullscreen else 26
+    countdown_size = 120 if fullscreen else 96
+    unit_size = 16 if fullscreen else 14
+    msg_size = 24 if fullscreen else 18
+    radius = 16 if fullscreen else 12
+    pad = "16px 32px" if fullscreen else "12px 24px"
+    bar_h = 10 if fullscreen else 8
+    return f"""
+#BreakRoot {{ background-color: {c['root']}; }}
+#titleLabel {{ color: {c['title']}; font-size: {title_size}px;
+    font-weight: 700; }}
+#countdownLabel {{ color: {c['countdown']}; font-size: {countdown_size}px;
+    font-weight: 800; }}
+#unitLabel {{ color: {c['unit']}; font-size: {unit_size}px; }}
+#messageLabel {{
+    color: #FFFFFF; font-size: {msg_size}px; font-weight: 600;
+    background-color: {c['card_bg']};
+    border: 2px solid {c['card_border']};
+    border-radius: {radius}px; padding: {pad};
+}}
+QProgressBar {{
+    background-color: {c['progress_track']};
+    border: none; border-radius: 4px; max-height: {bar_h}px;
+}}
+QProgressBar::chunk {{ background-color: {c['progress']};
+    border-radius: 4px; }}
+QPushButton {{
+    background-color: {c['btn']}; color: #FFFFFF; border: none;
+    border-radius: 8px; padding: 12px 32px;
+    font-size: 16px; font-weight: 600;
+}}
+QPushButton:hover {{ background-color: {c['btn_hover']}; }}
+QPushButton:pressed {{ background-color: {c['btn_press']}; }}
+QPushButton#postponeBtn {{ background-color: {c['btn2']}; }}
+QPushButton#postponeBtn:hover {{ background-color: {c['btn2_hover']}; }}
+QPushButton#postponeBtn:pressed {{ background-color: {c['btn2_press']}; }}
 """
-
-_FULLSCREEN_QSS = """
-#BreakRoot { background-color: rgba(13, 20, 34, 235); }
-#titleLabel { color: #ECEFF1; font-size: 32px; font-weight: 700; }
-#countdownLabel { color: #4DD0E1; font-size: 120px; font-weight: 800; }
-#unitLabel { color: #90A4AE; font-size: 16px; }
-#messageLabel { color: #CFD8DC; font-size: 20px; }
-QProgressBar {
-    background-color: rgba(255, 255, 255, 0.10);
-    border: none; border-radius: 4px; max-height: 10px;
-}
-QProgressBar::chunk { background-color: #26A69A; border-radius: 4px; }
-""" + _BUTTON_QSS
-
-_WINDOW_QSS = """
-#BreakRoot { background-color: #1B2430; }
-#titleLabel { color: #ECEFF1; font-size: 26px; font-weight: 700; }
-#countdownLabel { color: #4DD0E1; font-size: 96px; font-weight: 800; }
-#unitLabel { color: #90A4AE; font-size: 14px; }
-#messageLabel { color: #CFD8DC; font-size: 16px; }
-QProgressBar {
-    background-color: rgba(255, 255, 255, 0.10);
-    border: none; border-radius: 4px; max-height: 8px;
-}
-QProgressBar::chunk { background-color: #26A69A; border-radius: 4px; }
-""" + _BUTTON_QSS
 
 
 class BreakWindow(QWidget):
@@ -66,9 +68,12 @@ class BreakWindow(QWidget):
     closed = Signal()   # 窗口关闭（无论何种原因），供主程序释放展示权
 
     def __init__(self, cfg: AppConfig, is_test: bool = False,
+                 theme: Optional[dict] = None,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._cfg = cfg
+        self._theme = theme or resolve_theme(cfg.mask_theme,
+                                             cfg.mask_custom_color)
         self.is_test = is_test  # “测试弹窗”标记：离开自动结束时不计入统计
         self._remaining = cfg.break_seconds
         self._resolved = False  # 结果信号是否已发出
@@ -107,6 +112,7 @@ class BreakWindow(QWidget):
         btn_skip = QPushButton("跳过休息", self)
         btn_postpone = QPushButton(
             f"推迟 {self._cfg.postpone_minutes} 分钟", self)
+        btn_postpone.setObjectName("postponeBtn")
         btn_skip.clicked.connect(lambda: self._resolve(self.skipped))
         btn_postpone.clicked.connect(lambda: self._resolve(self.postponed))
 
@@ -138,13 +144,13 @@ class BreakWindow(QWidget):
                 | Qt.WindowType.WindowStaysOnTopHint
                 | Qt.WindowType.Tool)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            self.setStyleSheet(_FULLSCREEN_QSS)
+            self.setStyleSheet(_build_qss(self._theme, fullscreen=True))
         else:  # MODE_WINDOW（notification 模式不会创建本窗口）
             flags = Qt.WindowType.Window
             if self._cfg.always_on_top:
                 flags |= Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlags(flags)
-            self.setStyleSheet(_WINDOW_QSS)
+            self.setStyleSheet(_build_qss(self._theme, fullscreen=False))
 
     # ---------------- 对外 ----------------
     def start(self) -> None:

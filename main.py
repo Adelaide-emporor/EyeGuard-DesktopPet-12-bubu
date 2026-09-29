@@ -13,6 +13,7 @@ from break_window import BreakWindow
 from character import CharacterManager, CharacterPack
 from config import (MODE_NOTIFICATION, MODE_PET, AppConfig, load_config,
                     load_stats, save_stats)
+from hotkeys import HotkeyManager
 from pet_window import (EyeBreakPetWindow, ResidentPetWindow,
                         SedentaryPetWindow, SitDownPetWindow)
 from settings_window import SettingsDialog
@@ -45,6 +46,13 @@ class EyeGuardApp:
         # ---- 统一提醒队列：同一时间只展示一个提醒，其余排队 ----
         self._active_reminder: Optional[str] = None   # "eye" / "stand" / "sit"
         self._reminder_queue: List[str] = []
+        self._hotkeys = HotkeyManager()
+        self._hotkeys.restNow.connect(self._agent.trigger_break_now)
+        self._hotkeys.pauseToggled.connect(self._agent.toggle_pause)
+        if self._hotkeys.failed:
+            QTimer.singleShot(3000, lambda: self._tray.show_message(
+                "全局快捷键注册失败",
+                "、".join(self._hotkeys.failed) + " 可能被其他软件占用。"))
         self._resident_pet: Optional[ResidentPetWindow] = None
         self._eye_pet: Optional[EyeBreakPetWindow] = None
         self._settings: Optional[SettingsDialog] = None
@@ -105,7 +113,10 @@ class EyeGuardApp:
                 self._notif_timer.start(cfg.break_seconds * 1000)
             return
         # 全屏遮罩 / 普通窗口（这两种方式不出现桌宠）
-        window = BreakWindow(cfg, is_test=test_cfg is not None)
+        from mask_theme import resolve_theme
+        window = BreakWindow(
+            cfg, is_test=test_cfg is not None,
+            theme=resolve_theme(cfg.mask_theme, cfg.mask_custom_color))
         self._break_windows.append(window)
         if test_cfg is None:
             window.finished.connect(self._agent.on_break_done)
@@ -226,7 +237,8 @@ class EyeGuardApp:
         self._destroy_reminder_pets()  # 先销毁旧桌宠（停止旧音效）
         if test_cfg is not None or cfg.sound_enabled:
             self._play_reminder_sound("stand", cfg)  # 新音效最后提交
-        window = SedentaryPetWindow(pack, is_test=test_cfg is not None)
+        window = SedentaryPetWindow(pack, message=cfg.stand_message,
+                                    is_test=test_cfg is not None)
         window.set_name(cfg.pet_name)
         self._sedentary_windows.append(window)
         window.closed.connect(self._reshow_resident_later)
@@ -249,7 +261,8 @@ class EyeGuardApp:
         self._active_reminder = "sit"  # 坐下提醒属于站立流程的收尾
         if test_cfg is not None or cfg.sound_enabled:
             self._play_reminder_sound("sit", cfg)  # 新音效最后提交
-        window = SitDownPetWindow(pack, cfg.stand_minutes * 60)
+        window = SitDownPetWindow(pack, cfg.stand_minutes * 60,
+                                  message=cfg.sit_message)
         window.set_name(cfg.pet_name)
         self._sedentary_windows.append(window)
         window.closed.connect(self._reshow_resident_later)
@@ -312,13 +325,19 @@ class EyeGuardApp:
         self._active_reminder = "sit"  # 坐下提醒属于站立流程的收尾
         if self._cfg.sound_enabled:
             self._play_reminder_sound("sit", self._cfg)  # 新音效最后提交
-        window = SitDownPetWindow(pack, self._agent.last_stand_seconds)
+        window = SitDownPetWindow(pack, self._agent.last_stand_seconds,
+                                  message=self._cfg.sit_message)
         window.set_name(self._cfg.pet_name)
         self._sedentary_windows.append(window)
         window.closed.connect(self._reshow_resident_later)
         window.closed.connect(sound_player().stop)
         window.closed.connect(lambda: self._release_reminder("sit"))
         window.start()
+
+    def _on_pet_petted(self) -> None:
+        """摸头互动：按音效开关播一声轻快的“啵灵”。"""
+        if self._cfg.sound_enabled:
+            play_sound("pop")
 
     def _on_pet_home_moved(self, x: int, y: int) -> None:
         """常驻桌宠被拖到新位置：持久化到配置。"""
@@ -417,6 +436,7 @@ class EyeGuardApp:
             self._resident_pet = ResidentPetWindow(
                 pack, name=self._cfg.pet_name, home=home)
             self._resident_pet.homeMoved.connect(self._on_pet_home_moved)
+            self._resident_pet.petted.connect(self._on_pet_petted)
             self._resident_pet.start()
             LOG.info("常驻桌宠已显示（%s）", pack.name)
         elif not self._cfg.resident_pet and self._resident_pet is not None:
@@ -450,6 +470,7 @@ class EyeGuardApp:
         LOG.info("程序退出")
         save_stats(self._stats)
         self._agent.shutdown()
+        self._hotkeys.shutdown()
         if self._resident_pet is not None:
             self._resident_pet.close()
         self._close_eye_pet()

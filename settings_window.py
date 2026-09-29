@@ -8,9 +8,9 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QTime, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
-                               QDialog, QFileDialog, QInputDialog,
-                               QProgressDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QColorDialog,
+                               QComboBox, QDialog, QFileDialog,
+                               QInputDialog, QProgressDialog,
                                QTabWidget,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPlainTextEdit,
@@ -197,6 +197,14 @@ class SettingsDialog(QDialog):
         sit_char_row.addWidget(self._sit_add)
         sed_form.addRow("站立提醒角色", stand_char_row)
         sed_form.addRow("坐下提醒角色", sit_char_row)
+        self._stand_message = QLineEdit(self)
+        self._stand_message.setMaxLength(40)
+        self._stand_message.setPlaceholderText("该站起来动动啦！")
+        sed_form.addRow("站立提醒文案", self._stand_message)
+        self._sit_message = QLineEdit(self)
+        self._sit_message.setMaxLength(40)
+        self._sit_message.setPlaceholderText("可以坐啦~")
+        sed_form.addRow("坐下提醒文案", self._sit_message)
         sed_box = QGroupBox("久坐提醒（建议每 30 分钟起身活动 3–10 分钟）", self)
         sed_layout = QVBoxLayout(sed_box)
         sed_layout.addWidget(self._sed_enabled)
@@ -230,6 +238,25 @@ class SettingsDialog(QDialog):
         eye_form.addRow("弹窗标题", self._title)
         eye_form.addRow("弹窗正文", self._message)
         eye_form.addRow("提醒方式", self._mode)
+        self._mask_theme = QComboBox(self)
+        from mask_theme import THEMES
+        for key, (display, _hex) in THEMES.items():
+            self._mask_theme.addItem(display, key)
+        self._mask_custom = ""
+        self._mask_color_btn = QPushButton("选色...", self)
+        self._mask_color_btn.setToolTip(
+            "打开调色盘：在色域中点选颜色，用滑条调节色相与深浅，"
+            "也可直接输入 RGB/HSV 数值或吸取屏幕颜色")
+        self._mask_color_btn.clicked.connect(self._pick_mask_color)
+        self._mask_chip = QLabel(self)
+        self._mask_chip.setMinimumWidth(96)
+        self._mask_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mask_row = QHBoxLayout()
+        mask_row.addWidget(self._mask_theme, 1)
+        mask_row.addWidget(self._mask_color_btn)
+        mask_row.addWidget(self._mask_chip)
+        self._mask_theme.currentIndexChanged.connect(self._sync_mask_theme)
+        eye_form.addRow("遮罩主题", mask_row)
         eye_form.addRow("", self._on_top)
         eye_form.addRow("", self._sound)
         eye_form.addRow("提示音音量", volume_row)
@@ -261,6 +288,17 @@ class SettingsDialog(QDialog):
         gen_char_row.addWidget(self._gen_add)
         general_form.addRow("桌宠形象", gen_char_row)
         general_form.addRow("", self._autostart)
+        self._autostart_delay = QSpinBox(self)
+        self._autostart_delay.setRange(0, 300)
+        self._autostart_delay.setSuffix(" 秒")
+        self._autostart_delay.setSpecialValueText("立即启动")
+        self._autostart_delay.setToolTip(
+            "开机登录后延迟多久启动 EyeGuard（仅在勾选开机自启时生效）")
+        general_form.addRow("自启延迟", self._autostart_delay)
+        hotkey_hint = QLabel(
+            "全局快捷键：Ctrl+Alt+B 立即休息 · Ctrl+Alt+P 暂停/恢复", self)
+        hotkey_hint.setStyleSheet("color:#90A4AE; font-size:12px;")
+        general_form.addRow("", hotkey_hint)
 
         self._tabs.addTab(eye_tab, "护眼提醒")
         self._tabs.addTab(sed_tab, "久坐提醒")
@@ -324,7 +362,14 @@ class SettingsDialog(QDialog):
         self._ensure_sound_item(self._stand_sound, cfg.stand_sound)
         self._ensure_sound_item(self._sit_sound, cfg.sit_sound)
         self._resident.setChecked(cfg.resident_pet)
+        self._stand_message.setText(cfg.stand_message)
+        self._sit_message.setText(cfg.sit_message)
+        self._autostart_delay.setValue(cfg.autostart_delay_seconds)
         self._eye_enabled.setChecked(cfg.eye_care_enabled)
+        mask_index = self._mask_theme.findData(cfg.mask_theme)
+        self._mask_theme.setCurrentIndex(max(0, mask_index))
+        self._mask_custom = cfg.mask_custom_color
+        self._sync_mask_theme()
         self._pet_name.setText(cfg.pet_name)
         char_index = self._char_combo.findData(cfg.pet_character)
         self._char_combo.setCurrentIndex(max(0, char_index))
@@ -353,9 +398,14 @@ class SettingsDialog(QDialog):
         cfg.daily_stand_cap_minutes = self._sed_cap.value()
         cfg.stand_character = self._stand_char.currentData() or "yier"
         cfg.sit_character = self._sit_char.currentData() or "yier"
+        cfg.stand_message = self._stand_message.text().strip() or "该站起来动动啦！"
+        cfg.sit_message = self._sit_message.text().strip() or "可以坐啦~"
+        cfg.autostart_delay_seconds = self._autostart_delay.value()
         cfg.stand_sound = self._stand_sound.currentData() or "pop"
         cfg.sit_sound = self._sit_sound.currentData() or "sparkle"
         cfg.eye_care_enabled = self._eye_enabled.isChecked()
+        cfg.mask_theme = self._mask_theme.currentData() or "teal"
+        cfg.mask_custom_color = self._mask_custom
         cfg.eye_character = self._eye_char.currentData() or "yier"
         cfg.eye_sound = self._eye_sound.currentData() or "ding"
         cfg.pet_name = self._pet_name.text().strip() or "夏cc"
@@ -363,6 +413,37 @@ class SettingsDialog(QDialog):
             cfg.pet_character = self._char_combo.currentData()
         cfg.resident_pet = self._resident.isChecked()
         return cfg.sanitized()
+
+    def _sync_mask_theme(self) -> None:
+        """刷新“当前颜色”色块：自定义色优先，否则显示下拉预设的色。"""
+        from mask_theme import THEMES
+        preset_hex = THEMES.get(
+            self._mask_theme.currentData() or "teal", ("", "#26A69A"))[1]
+        effective = self._mask_custom or preset_hex
+        self._mask_chip.setText(effective)
+        self._mask_chip.setStyleSheet(
+            f"background-color:{effective}; color:#FFFFFF;"
+            "border:1px solid #90A4AE; border-radius:4px; font-weight:600;")
+        if self._mask_custom:
+            self._mask_color_btn.setText("重选颜色...")
+        else:
+            self._mask_color_btn.setText("选色...")
+
+    def _pick_mask_color(self) -> None:
+        """打开 Photoshop 风格调色盘（色域点选 + 色相/深浅滑条 + RGB/HSV）。"""
+        from PySide6.QtGui import QColor
+        LOG.info("用户点击选色：打开调色盘")
+        initial = QColor(self._mask_custom if self._mask_custom
+                         else "#26A69A")
+        color = QColorDialog.getColor(
+            initial, self, "选择遮罩主题色",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog)
+        if color.isValid():
+            LOG.info("选色完成: %s", color.name())
+            self._mask_custom = color.name()
+            self._sync_mask_theme()
+        else:
+            LOG.info("选色已取消")
 
     def _sync_dnd(self) -> None:
         enabled = self._dnd_enabled.isChecked()
@@ -595,7 +676,8 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(
                 self, "EyeGuard", "配置保存失败，请检查磁盘权限或查看日志。")
             return
-        if not autostart.set_enabled(cfg.autostart):
+        if not autostart.set_enabled(cfg.autostart,
+                                     cfg.autostart_delay_seconds):
             QMessageBox.warning(
                 self, "EyeGuard", "开机自启写入注册表失败，请查看日志。")
         self.saved.emit(cfg)

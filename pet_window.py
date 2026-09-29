@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF,
@@ -28,6 +29,12 @@ from config import AppConfig
 
 BUBBLE_W = 300
 PET_DISPLAY_H = 150    # 所有桌宠统一显示高度（像素），不随素材尺寸变化
+
+# 摸头/闲聊台词（随机冒一句，出现在桌宠头顶的临时气泡里）
+CHATTER_LINES = [
+    "喝水了吗？", "记得看看远处哦~", "坐直一点更舒服！",
+    "伸个懒腰吧~", "我一直在陪你哦", "起来走两步吧！",
+]
 _LABEL_QSS = ("color:#4E342E; font-size:15px; font-weight:600;"
               " background:transparent;")
 _BTN_GREEN_QSS = ("QPushButton { background-color:#2E7D32; color:white;"
@@ -121,6 +128,7 @@ class PetWindow(QWidget):
     postponeClicked = Signal()    # 用户选择“N 分钟后提醒”
     closed = Signal()   # 窗口关闭（无论何种原因），供主程序调度常驻桌宠回归
     homeMoved = Signal(int, int)  # 常驻桌宠被拖拽到新位置 (x, y)
+    petted = Signal()   # 用户单击摸头（常驻桌宠）
 
     def __init__(self, pack: CharacterPack, mode: str,
                  is_test: bool = False, auto_close_ms: Optional[int] = None,
@@ -140,6 +148,8 @@ class PetWindow(QWidget):
         self._drag_offset: Optional[QPoint] = None
         self._press_global: Optional[QPoint] = None
         self._drag_moved = False
+        self._pet_until_tick = 0   # 摸头后保持 happy 动作直到该 tick
+        self._chatter: Optional["ChatterBubble"] = None
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
@@ -305,7 +315,7 @@ class PetWindow(QWidget):
     def _current_state(self) -> str:
         """按窗口模式与阶段推导当前动作。"""
         if self._mode == "resident":
-            return "idle"
+            return ("happy" if self._tick < self._pet_until_tick else "idle")
         if self._mode == "break":
             return "blink"
         if self._phase == "enter":
@@ -459,6 +469,8 @@ class PetWindow(QWidget):
                     new_pos = self._clamp_into_screen(self.pos())
                     self.move(new_pos)
                     self.homeMoved.emit(new_pos.x(), new_pos.y())
+            elif self._mode == "resident":
+                self._on_petted()  # 原地单击常驻桌宠 = 摸头互动
             else:  # 原地单击（未拖动）→ 执行原有单击行为
                 if self._mode == "sit" and not inside_bubble:
                     self._resolved = True
@@ -470,6 +482,22 @@ class PetWindow(QWidget):
         self._press_global = None
         self._drag_moved = False
         event.accept()
+
+    def _on_petted(self) -> None:
+        """摸头互动：开心跳一下，偶尔回一句话（主程序负责音效）。"""
+        duration = self._pack.duration_ms("happy")
+        self._pet_until_tick = self._tick + max(
+            1, duration // self._interval_ms)
+        self.petted.emit()
+        if random.random() < 0.6:
+            self.show_chatter(random.choice(CHATTER_LINES))
+
+    def show_chatter(self, text: str) -> None:
+        """在桌宠头顶弹出一个临时闲聊气泡（独立窗口，4 秒后消失）。"""
+        if self._mode != "resident" or not self.isVisible():
+            return
+        self._chatter = ChatterBubble(text, self)
+        self._chatter.show()
 
     def _clamp_into_screen(self, pos: QPoint) -> QPoint:
         """把窗口位置限制在主屏可用区域内。"""
@@ -505,28 +533,32 @@ class PetWindow(QWidget):
 
 
 class SedentaryPetWindow(PetWindow):
-    """起身提醒桌宠：跳出挥手 + “该站起来动动啦！”；2 分钟未处理按推迟。"""
+    """起身提醒桌宠：跳出挥手 + 自定义气泡文案；2 分钟未处理按推迟。"""
 
-    def __init__(self, pack: CharacterPack, is_test: bool = False,
+    def __init__(self, pack: CharacterPack,
+                 message: str = "该站起来动动啦！", is_test: bool = False,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(pack, mode="reminder", is_test=is_test,
+                         bubble_text=message,
                          auto_close_ms=120_000, parent=parent)
 
 
 class SitDownPetWindow(PetWindow):
-    """坐下提示桌宠：乖巧坐着 + “可以坐啦~”；点击任意处或 15 秒后消失。"""
+    """坐下提示桌宠：乖巧坐着 + 自定义气泡文案；点击任意处或 15 秒后消失。"""
 
     def __init__(self, pack: CharacterPack, stand_seconds: int = 0,
-                 is_test: bool = False,
+                 message: str = "可以坐啦~", is_test: bool = False,
                  parent: Optional[QWidget] = None) -> None:
+        self._sit_text = message
         super().__init__(pack, mode="sit", is_test=is_test,
+                         bubble_text=message,
                          auto_close_ms=15_000, parent=parent)
         if stand_seconds >= 60:
             duration = f"{stand_seconds // 60} 分 {stand_seconds % 60} 秒"
         else:
             duration = f"{stand_seconds} 秒"
-        self._bubble._message.setText(
-            f"可以坐啦~\n本次站立 {duration}，干得漂亮！")
+        full_text = message + chr(10) + f"本次站立 {duration}，干得漂亮！"
+        self._bubble._message.setText(full_text)
 
 
 class ResidentPetWindow(PetWindow):
@@ -549,6 +581,17 @@ class ResidentPetWindow(PetWindow):
             self._timer.start()
             return
         super().start()
+        self._schedule_chatter()
+
+    def _schedule_chatter(self) -> None:
+        """安排下一次随机闲聊（5–10 分钟后，仅常驻桌宠）。"""
+        QTimer.singleShot(random.randint(300, 600) * 1000,
+                          self._idle_chatter)
+
+    def _idle_chatter(self) -> None:
+        if self.isVisible() and self._mode == "resident":
+            self.show_chatter(random.choice(CHATTER_LINES))
+        self._schedule_chatter()
 
 
 class EyeBreakPetWindow(PetWindow):
@@ -572,3 +615,41 @@ class EyeBreakPetWindow(PetWindow):
                             - self._tick * self._interval_ms // 1000)
             self._bubble._message.setText(
                 f"{self._message}\n{remaining} 秒后继续工作")
+
+
+class ChatterBubble(QWidget):
+    """桌宠头顶的临时闲聊气泡：独立透明顶层窗口，4 秒后自动消失。
+
+    不挂在桌宠窗口内，避免常驻桌宠的鼠标拦截区域被永久放大。
+    """
+
+    def __init__(self, text: str, pet: "PetWindow") -> None:
+        super().__init__(None)
+        self._text = text
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+                            | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(250, 56)
+        # 位置：桌宠头顶居中，限制在屏幕内
+        screen = QApplication.primaryScreen()
+        geo = (screen.availableGeometry() if screen is not None
+               else QRect(0, 0, 1920, 1080))
+        x = pet.x() + pet.width() // 2 - self.width() // 2
+        y = pet.y() - self.height() - 6
+        x = max(geo.left(), min(x, geo.right() - self.width()))
+        y = max(geo.top(), y)
+        self.move(x, y)
+        QTimer.singleShot(4000, self.deleteLater)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor("#8D6E63"), 2))
+        painter.setBrush(QBrush(QColor(255, 255, 255, 246)))
+        painter.drawRoundedRect(QRectF(1, 1, self.width() - 2,
+                                       self.height() - 10), 14.0, 14.0)
+        painter.setPen(QPen(QColor("#4E342E")))
+        painter.drawText(QRectF(6, 4, self.width() - 12, self.height() - 18),
+                         Qt.AlignmentFlag.AlignCenter, self._text)
+        painter.end()

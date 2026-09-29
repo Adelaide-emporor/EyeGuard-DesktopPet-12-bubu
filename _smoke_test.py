@@ -221,6 +221,7 @@ app2._destroy_reminder_pets()
 app2._reminder_queue.clear()
 app2._active_reminder = None
 app2._agent.shutdown()
+app2._hotkeys.shutdown()
 
 # ================= 角色包 / 自定义角色上传 =================
 ensure_sound_files()
@@ -310,6 +311,104 @@ check("遮罩预览旧窗口静默关闭不发跳过",
 mask2.dismiss_quietly()
 
 check("统计持久化含站立数据", load_stats().stand_seconds >= 0)
+
+# ================= v1.3.0 新增：文案/摸头/自启延迟/快捷键 =================
+custom_cfg = AppConfig(stand_message="站起来！", sit_message="坐下吧",
+                       autostart_delay_seconds=45)
+roundtrip = AppConfig(stand_message=custom_cfg.stand_message,
+                      sit_message=custom_cfg.sit_message,
+                      autostart_delay_seconds=custom_cfg.autostart_delay_seconds)
+check("久坐文案与自启延迟配置往返",
+      roundtrip.stand_message == "站起来！"
+      and roundtrip.sit_message == "坐下吧"
+      and roundtrip.autostart_delay_seconds == 45)
+check("空文案回退默认", AppConfig(stand_message="  ").sanitized()
+      .stand_message == "该站起来动动啦！")
+check("自启延迟夹紧 0-300", AppConfig(autostart_delay_seconds=999)
+      .sanitized().autostart_delay_seconds == 300)
+
+from autostart import autostart_command  # noqa: E402
+value0, vbs0 = autostart_command(0)
+value30, vbs30 = autostart_command(30)
+check("无延迟自启命令直接指向程序", "wscript" not in value0 and vbs0 is None)
+check("延迟自启命令返回 wscript 键值",
+      vbs30 is not None and value30.startswith("wscript"))
+
+mask3 = BreakWindow(AppConfig(popup_mode=MODE_WINDOW), is_test=True)
+btns = mask3.findChildren(type(mask3.findChild(
+    __import__("PySide6.QtWidgets", fromlist=["QPushButton"]).QPushButton)))
+postpone = [b for b in btns if b.objectName() == "postponeBtn"]
+check("遮罩推迟按钮具备高对比样式标识", len(postpone) == 1
+      and "background-color: #" in mask3.styleSheet())
+mask3.dismiss_quietly()
+
+# ================= 遮罩颜色主题 =================
+from mask_theme import THEMES, resolve_theme  # noqa: E402
+check("内置 8 套遮罩主题", len(THEMES) == 8)
+teal_c = resolve_theme("teal")
+rose_c = resolve_theme("rose")
+custom_c = resolve_theme("custom", "#FF0000")
+check("主题解析生成不同按钮色", teal_c["btn"].lower() == "#26a69a"
+      and rose_c["btn"].lower() == "#ec407a"
+      and custom_c["btn"].upper() == "#FF0000")
+check("未知主题回退默认", resolve_theme("nope")["btn"].lower()
+      == "#26a69a")
+check("非法自定义色回退默认", resolve_theme("custom", "not-a-color")["btn"]
+      .lower() == "#26a69a")
+check("自定义主题色合法校验", AppConfig(mask_custom_color="#12abef")
+      .sanitized().mask_custom_color == "#12abef"
+      and AppConfig(mask_custom_color="red").sanitized().mask_custom_color
+      == "")
+check("旧配置 custom 主题名回退预设（色值仍生效）",
+      AppConfig(mask_theme="custom", mask_custom_color="#123456")
+      .sanitized().mask_theme == "teal"
+      and AppConfig(mask_theme="custom",
+                    mask_custom_color="#123456").sanitized()
+      .mask_custom_color == "#123456")
+check("自定义色优先于预设名", resolve_theme("teal", "#FF0000")["btn"]
+      .upper() == "#FF0000")
+dlg3 = SettingsDialog(AppConfig(mask_custom_color="#FF0000"), manager)
+check("遮罩主题下拉仅 8 预设（无自定义项）",
+      dlg3._mask_theme.count() == len(THEMES)
+      and dlg3._mask_theme.findData("custom") < 0)
+check("选色按钮常驻可用且色块显示自定义色",
+      dlg3._mask_color_btn.isEnabled()
+      and dlg3._mask_chip.text() == "#FF0000")
+_sw.QColorDialog.getColor = lambda *a, **k: QColor("#00AAFF")
+dlg3._mask_color_btn.click()  # 真实点击信号 → 应走到 _pick_mask_color
+check("点击选色按钮触发调色盘并更新色块",
+      dlg3._mask_chip.text() == "#00aaff")
+# 点击“选色...”：调色盘返回固定色 → 色块与自定义状态更新（回归 ImportError）
+from PySide6.QtGui import QColor as _QColor  # noqa: E402
+_sw.QColorDialog.getColor = lambda *a, **k: _QColor("#FF8800")
+dlg3._pick_mask_color()
+check("选色按钮调用调色盘并更新色块",
+      dlg3._mask_chip.text() == "#ff8800"
+      and dlg3._mask_color_btn.text() == "重选颜色...")
+dlg3.close(); dlg3.deleteLater()
+theme_win = BreakWindow(AppConfig(popup_mode=MODE_WINDOW), is_test=True,
+                        theme=custom_c)
+theme_win.start()
+QTest.qWait(60)
+check("自定义主题色遮罩可创建显示", theme_win.isVisible()
+      and "#ff0000" in theme_win.styleSheet().lower())
+theme_win.dismiss_quietly()
+
+resident2 = ResidentPetWindow(manager.get("yier"), name="夏cc")
+resident2.start()
+QTest.qWait(60)
+petted_events: list = []
+resident2.petted.connect(lambda: petted_events.append(1))
+resident2._on_petted()
+QTest.qWait(50)
+check("摸头触发信号并进入开心动作",
+      petted_events == [1] and resident2._tick < resident2._pet_until_tick
+      and resident2._current_state() == "happy")
+resident2.close()
+
+from hotkeys import HotkeyManager  # noqa: E402
+check("全局快捷键模块具备双信号", hasattr(HotkeyManager, "restNow")
+      and hasattr(HotkeyManager, "pauseToggled"))
 
 # ================= 提示音 =================
 ensure_sound_files()

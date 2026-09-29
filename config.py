@@ -16,6 +16,13 @@ MODE_PET = "pet"                    # 桌宠眨眼（无弹窗，角色眨眼 + 
 POPUP_MODES = (MODE_FULLSCREEN, MODE_WINDOW, MODE_NOTIFICATION, MODE_PET)
 
 
+def _is_hex_color(text: str) -> bool:
+    """校验 #RRGGBB 格式的颜色串。"""
+    if len(text) != 7 or not text.startswith("#"):
+        return False
+    return all(ch in "0123456789abcdefABCDEF" for ch in text[1:])
+
+
 def _to_int(value: Any, fallback: int) -> int:
     """宽容的 int 转换：失败时返回 fallback。"""
     try:
@@ -36,6 +43,8 @@ class AppConfig:
     always_on_top: bool = True      # 普通窗口模式下是否置顶
     sound_enabled: bool = True      # 正式提醒时是否播放提示音
     eye_care_enabled: bool = True   # 启用护眼提醒（总开关）
+    mask_theme: str = "teal"        # 遮罩颜色主题（mask_theme.THEMES 键或 custom）
+    mask_custom_color: str = ""     # 自定义主题色（#RRGGBB，仅 custom 时生效）
     volume: int = 80                # 提示音音量（0-100，默认 80，永不为 0）
     eye_character: str = "yier"     # 护眼提醒陪伴桌宠角色
     eye_sound: str = "ding"         # 护眼提醒音（内置名或 file: 自定义路径）
@@ -50,6 +59,9 @@ class AppConfig:
     daily_stand_cap_minutes: int = 120    # 每日站立上限提醒（分钟，0=不提醒）
     stand_sound: str = "pop"        # 站立（起身）提醒音，与护眼默认不同
     sit_sound: str = "sparkle"      # 坐下提醒音，三种默认音色互不相同
+    stand_message: str = "该站起来动动啦！"   # 站立提醒气泡文案
+    sit_message: str = "可以坐啦~"           # 坐下提醒气泡文案
+    autostart_delay_seconds: int = 30        # 开机自启延迟（秒，0=立即）
     stand_character: str = "yier"   # 站立（起身）提醒角色（characters/ 包名）
     sit_character: str = "yier"     # 坐下提醒角色（可与站立不同）
     pet_character: str = "yier"     # 常驻待机桌宠角色
@@ -85,7 +97,16 @@ class AppConfig:
         cfg.pet_character = str(cfg.pet_character).strip() or "yier"
         cfg.eye_character = str(cfg.eye_character).strip() or "yier"
         cfg.eye_care_enabled = bool(cfg.eye_care_enabled)
+        from mask_theme import THEMES
+        cfg.mask_theme = (cfg.mask_theme if cfg.mask_theme in THEMES
+                          else "teal")
+        custom = str(cfg.mask_custom_color).strip()
+        cfg.mask_custom_color = custom if _is_hex_color(custom) else ""
         cfg.stand_character = str(cfg.stand_character).strip() or "yier"
+        cfg.stand_message = str(cfg.stand_message).strip() or "该站起来动动啦！"
+        cfg.sit_message = str(cfg.sit_message).strip() or "可以坐啦~"
+        cfg.autostart_delay_seconds = min(
+            max(0, _to_int(cfg.autostart_delay_seconds, 30)), 300)
         cfg.sit_character = str(cfg.sit_character).strip() or "yier"
         cfg.pet_name = str(cfg.pet_name).strip() or "夏cc"
         cfg.pet_home_x = max(-1, _to_int(cfg.pet_home_x, -1))
