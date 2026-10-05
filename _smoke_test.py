@@ -87,11 +87,21 @@ monitor._apply_flag(REASON_IDLE, False)
 check("短暂空闲恢复继续且宽限到 60 秒", agent.remaining_seconds() >= 60)
 
 agent._remaining = 300
+agent._cfg.away_reset_seconds = 60  # 验证自定义阈值生效
 monitor._apply_flag(REASON_IDLE, True)
-monitor._absence_start = datetime.now() - timedelta(
-    seconds=AWAY_RESET_SECONDS + 30)
+monitor._absence_start = datetime.now() - timedelta(seconds=90)
 monitor._apply_flag(REASON_IDLE, False)
-check("空闲超过 1 分钟重置周期", agent.remaining_seconds() == FULL)
+check("空闲超过配置阈值（60 秒）重置周期",
+      agent.remaining_seconds() == FULL)
+
+agent._cfg.away_reset_seconds = 300  # 默认阈值：90 秒空闲不算休息
+agent._remaining = 300
+monitor._apply_flag(REASON_IDLE, True)
+monitor._absence_start = datetime.now() - timedelta(seconds=90)
+monitor._apply_flag(REASON_IDLE, False)
+check("默认阈值 300 秒：90 秒空闲不重置、继续计时",
+      agent.remaining_seconds() == 300 and agent.state == STATE_WORK)
+agent._cfg.away_reset_seconds = 60
 
 auto: list = []
 agent.breakAutoFinished.connect(lambda: auto.append(1))
@@ -217,6 +227,16 @@ app2._release_reminder("eye")
 check("释放后自动展示排队提醒",
       app2._active_reminder == "stand"
       and any(w.isVisible() for w in app2._sedentary_windows))
+# 看门狗：展示权卡死（无可见窗口）时 30 秒内强制释放并调度队列
+app2._destroy_reminder_pets()          # 模拟窗口全部消失但展示权残留
+app2._active_reminder = "stand"        # 人为制造卡死
+app2._reminder_queue = ["eye"]
+app2._reminder_watchdog_tick()          # 手动触发一次看门狗
+QTest.qWait(400)
+check("看门狗释放卡死展示权并调度排队提醒",
+      app2._active_reminder == "eye"
+      and (any(w.isVisible() for w in app2._break_windows)
+           or app2._eye_pet is not None))
 app2._destroy_reminder_pets()
 app2._reminder_queue.clear()
 app2._active_reminder = None
@@ -333,6 +353,12 @@ value30, vbs30 = autostart_command(30)
 check("无延迟自启命令直接指向程序", "wscript" not in value0 and vbs0 is None)
 check("延迟自启命令返回 wscript 键值",
       vbs30 is not None and value30.startswith("wscript"))
+from autostart import _vbs_run_line  # noqa: E402
+line2 = _vbs_run_line(30).splitlines()[1]
+check("vbs Run 行引号正确（三引号包裹不带引号路径）",
+      line2 == 'CreateObject("WScript.Shell").Run '
+               '"""D:/ai_tool/EyeGuard.exe""", 1, False'
+      or (line2.count('"') == 8 and line2.endswith(', 1, False')))
 
 mask3 = BreakWindow(AppConfig(popup_mode=MODE_WINDOW), is_test=True)
 btns = mask3.findChildren(type(mask3.findChild(
@@ -378,6 +404,16 @@ _sw.QColorDialog.getColor = lambda *a, **k: QColor("#00AAFF")
 dlg3._mask_color_btn.click()  # 真实点击信号 → 应走到 _pick_mask_color
 check("点击选色按钮触发调色盘并更新色块",
       dlg3._mask_chip.text() == "#00aaff")
+# 选择预设主题 → 清除自定义色，预设立即生效（修复“预设不生效”）
+forest_index = dlg3._mask_theme.findData("forest")
+dlg3._mask_theme.setCurrentIndex(forest_index)
+check("选择预设主题清除自定义色并生效",
+      dlg3._mask_custom == ""
+      and dlg3._mask_chip.text().lower() == "#43a047")
+roundtrip_mask = dlg3._collect()
+check("预设主题保存后不再被旧自定义色覆盖",
+      roundtrip_mask.mask_theme == "forest"
+      and roundtrip_mask.mask_custom_color == "")
 # 点击“选色...”：调色盘返回固定色 → 色块与自定义状态更新（回归 ImportError）
 from PySide6.QtGui import QColor as _QColor  # noqa: E402
 _sw.QColorDialog.getColor = lambda *a, **k: _QColor("#FF8800")

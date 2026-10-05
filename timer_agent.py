@@ -18,7 +18,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from activity import (BIG_REASONS, AWAY_RESET_SECONDS, RESUME_GRACE_SECONDS,
+from activity import (BIG_REASONS, RESUME_GRACE_SECONDS,
                       REASON_TEXT, ScreenActivityMonitor)
 from config import AppConfig, Stats
 from utils import LOG, in_dnd
@@ -273,7 +273,7 @@ class TimerAgent(QObject):
         """回到屏幕：护眼按离开时长重置或继续（均不立即触发提醒）。"""
         if self._state != STATE_WORK:
             return
-        if big_state or away_seconds > AWAY_RESET_SECONDS:
+        if big_state or away_seconds > self._cfg.away_reset_seconds:
             LOG.info("离开 %.0f 秒%s，视为眼睛已休息，重置护眼周期",
                      away_seconds,
                      "（经过锁屏/屏保/关屏/睡眠/会话断开）" if big_state else "")

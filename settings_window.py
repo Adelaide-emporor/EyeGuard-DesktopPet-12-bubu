@@ -235,6 +235,14 @@ class SettingsDialog(QDialog):
         eye_form.addRow("工作时长", self._work)
         eye_form.addRow("休息时长", self._break_sec)
         eye_form.addRow("推迟时长", self._postpone)
+        self._away_reset = QSpinBox(self)
+        self._away_reset.setRange(60, 1800)
+        self._away_reset.setSuffix(" 秒")
+        self._away_reset.setToolTip(
+            "键鼠空闲超过该时长才视为离开休息过并重置护眼周期；"
+            "短时间离开回来后继续原倒计时；"
+            "锁屏/屏保/关屏/睡眠始终立即重置，不受此值影响。")
+        eye_form.addRow("离开视为休息", self._away_reset)
         eye_form.addRow("弹窗标题", self._title)
         eye_form.addRow("弹窗正文", self._message)
         eye_form.addRow("提醒方式", self._mode)
@@ -255,7 +263,8 @@ class SettingsDialog(QDialog):
         mask_row.addWidget(self._mask_theme, 1)
         mask_row.addWidget(self._mask_color_btn)
         mask_row.addWidget(self._mask_chip)
-        self._mask_theme.currentIndexChanged.connect(self._sync_mask_theme)
+        self._mask_theme.currentIndexChanged.connect(
+            self._on_mask_theme_changed)
         eye_form.addRow("遮罩主题", mask_row)
         eye_form.addRow("", self._on_top)
         eye_form.addRow("", self._sound)
@@ -365,6 +374,7 @@ class SettingsDialog(QDialog):
         self._stand_message.setText(cfg.stand_message)
         self._sit_message.setText(cfg.sit_message)
         self._autostart_delay.setValue(cfg.autostart_delay_seconds)
+        self._away_reset.setValue(cfg.away_reset_seconds)
         self._eye_enabled.setChecked(cfg.eye_care_enabled)
         mask_index = self._mask_theme.findData(cfg.mask_theme)
         self._mask_theme.setCurrentIndex(max(0, mask_index))
@@ -401,6 +411,7 @@ class SettingsDialog(QDialog):
         cfg.stand_message = self._stand_message.text().strip() or "该站起来动动啦！"
         cfg.sit_message = self._sit_message.text().strip() or "可以坐啦~"
         cfg.autostart_delay_seconds = self._autostart_delay.value()
+        cfg.away_reset_seconds = self._away_reset.value()
         cfg.stand_sound = self._stand_sound.currentData() or "pop"
         cfg.sit_sound = self._sit_sound.currentData() or "sparkle"
         cfg.eye_care_enabled = self._eye_enabled.isChecked()
@@ -413,6 +424,11 @@ class SettingsDialog(QDialog):
             cfg.pet_character = self._char_combo.currentData()
         cfg.resident_pet = self._resident.isChecked()
         return cfg.sanitized()
+
+    def _on_mask_theme_changed(self, index: int) -> None:
+        """用户选择预设主题：退出自定义色，让预设立即生效。"""
+        self._mask_custom = ""
+        self._sync_mask_theme()
 
     def _sync_mask_theme(self) -> None:
         """刷新“当前颜色”色块：自定义色优先，否则显示下拉预设的色。"""

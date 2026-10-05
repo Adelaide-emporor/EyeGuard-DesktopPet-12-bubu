@@ -47,6 +47,7 @@ class EyeGuardApp:
         self._active_reminder: Optional[str] = None   # "eye" / "stand" / "sit"
         self._reminder_queue: List[str] = []
         self._hotkeys = HotkeyManager()
+        self._start_reminder_watchdog()
         self._hotkeys.restNow.connect(self._agent.trigger_break_now)
         self._hotkeys.pauseToggled.connect(self._agent.toggle_pause)
         if self._hotkeys.failed:
@@ -111,6 +112,9 @@ class EyeGuardApp:
             self._tray.show_message(cfg.popup_title, cfg.popup_message)
             if test_cfg is None:
                 self._notif_timer.start(cfg.break_seconds * 1000)
+                # 气泡展示满时长后释放展示权（此前遗漏导致队列永久卡死）
+                QTimer.singleShot(cfg.break_seconds * 1000 + 800,
+                                  lambda: self._release_reminder("eye"))
             return
         # 全屏遮罩 / 普通窗口（这两种方式不出现桌宠）
         from mask_theme import resolve_theme
@@ -125,6 +129,7 @@ class EyeGuardApp:
         window.closed.connect(
             lambda: self._release_reminder("eye"))
         window.start()
+        LOG.info("开始展示：护眼遮罩（主题 %s）", cfg.mask_theme)
 
     def _notif_break_done(self) -> None:
         """仅通知模式：气泡展示满 break_seconds 后视为完成休息。"""
@@ -248,6 +253,7 @@ class EyeGuardApp:
             window.confirmed.connect(self._agent.sedentary_confirmed)
             window.snoozed.connect(self._agent.sedentary_snoozed)
         window.start()
+        LOG.info("开始展示：站立提醒桌宠（%s）", pack.name)
 
     def show_sit_reminder(self, test_cfg: Optional[AppConfig] = None) -> None:
         """坐下提醒预览/展示：坐下角色 + 坐下音效（供“测试坐下提醒”）。"""
@@ -292,6 +298,29 @@ class EyeGuardApp:
     def _release_reminder(self, kind: str) -> None:
         """释放展示权并立即展示队列中的下一个提醒。"""
         if self._active_reminder == kind:
+            self._active_reminder = None
+            self._dispatch_next_reminder()
+
+    def _start_reminder_watchdog(self) -> None:
+        """每 30 秒检查：展示权被占用但没有任何可见提醒窗口 → 强制释放。
+
+        兜底各种异常路径（通知模式遗漏、窗口异常销毁等）造成的队列卡死，
+        表现为“到时间不弹任何提醒”。"""
+        self._watchdog = QTimer()
+        self._watchdog.setInterval(30_000)
+        self._watchdog.timeout.connect(self._reminder_watchdog_tick)
+        self._watchdog.start()
+
+    def _reminder_watchdog_tick(self) -> None:
+        kind = self._active_reminder
+        if kind is None:
+            return
+        visible = (any(w.isVisible() for w in self._break_windows)
+                   or (self._eye_pet is not None and self._eye_pet.isVisible())
+                   or any(w.isVisible() for w in self._sedentary_windows))
+        if not visible:
+            LOG.warning("看门狗：展示权 %s 卡死（无可见提醒窗口），强制释放",
+                        kind)
             self._active_reminder = None
             self._dispatch_next_reminder()
 

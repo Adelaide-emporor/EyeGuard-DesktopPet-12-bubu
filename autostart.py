@@ -26,15 +26,33 @@ def _vbs_path() -> Path:
     return app_data_dir() / "autostart.vbs"
 
 
-def _exe_command() -> str:
-    """直接启动命令：打包后是 exe 本身；源码运行是 python main.py。"""
+def _exe_path() -> str:
+    """程序路径（不带引号，供 Run 键值与 vbs 各自加引号）。"""
     if getattr(sys, "frozen", False):  # PyInstaller 环境
-        return f'"{sys.executable}"'
+        return sys.executable
     try:
-        script = Path(sys.argv[0]).resolve()
+        return str(Path(sys.argv[0]).resolve())
     except (ValueError, OSError):
-        script = Path("main.py")
-    return f'"{sys.executable}" "{script}"'
+        return str(Path("main.py").resolve())
+
+
+def _exe_command() -> str:
+    """直接启动命令（Run 键值用）：路径带引号；源码运行带解释器。"""
+    if getattr(sys, "frozen", False):
+        return f'"{_exe_path()}"'
+    return f'"{sys.executable}" "{_exe_path()}"'
+
+
+def _vbs_run_line(delay_seconds: int) -> str:
+    """生成 vbs 脚本内容：先 Sleep 再启动程序。
+
+    引号规则：Run 的命令字符串内路径需要引号 → 源码中用三引号包裹
+    （VBScript 里 "" = 转义引号）。路径本身必须不带引号。
+    """
+    exe = _exe_path()
+    assert '"' not in exe, "程序路径不应包含引号"
+    return (f"WScript.Sleep {int(delay_seconds) * 1000}\n"
+            f'CreateObject("WScript.Shell").Run """{exe}""", 1, False\n')
 
 
 def autostart_command(delay_seconds: int = 0) -> Tuple[str, Optional[Path]]:
@@ -45,10 +63,7 @@ def autostart_command(delay_seconds: int = 0) -> Tuple[str, Optional[Path]]:
     """
     if delay_seconds <= 0:
         return _exe_command(), None
-    vbs = _vbs_path()
-    script = (f"WScript.Sleep {int(delay_seconds) * 1000}\n"
-              f'CreateObject("WScript.Shell").Run """{_exe_command()}""", 1, False\n')
-    return f'wscript.exe "{vbs}"', vbs
+    return f'wscript.exe "{_vbs_path()}"', _vbs_path()
 
 
 def is_enabled() -> bool:
@@ -75,10 +90,8 @@ def enable(delay_seconds: int = 0) -> bool:
     value, vbs_path = autostart_command(delay_seconds)
     if vbs_path is not None:
         try:
-            script = (f"WScript.Sleep {int(delay_seconds) * 1000}\n"
-                      f'CreateObject("WScript.Shell").Run '
-                      f'"""{_exe_command()}""", 1, False\n')
-            vbs_path.write_text(script, encoding="utf-8")
+            vbs_path.write_text(_vbs_run_line(delay_seconds),
+                                encoding="utf-8")
         except OSError as exc:
             LOG.error("写入自启延迟脚本失败: %s", exc)
             return False

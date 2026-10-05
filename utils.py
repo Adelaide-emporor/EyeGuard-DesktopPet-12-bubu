@@ -29,7 +29,7 @@ except ImportError:  # 非 Windows 平台兜底
     winsound = None  # type: ignore[assignment]
 
 APP_NAME = "EyeGuard"
-APP_VERSION = "v1.4.4"
+APP_VERSION = "v1.5.0"
 LOG = logging.getLogger(APP_NAME)
 
 

@@ -43,6 +43,7 @@ class AppConfig:
     always_on_top: bool = True      # 普通窗口模式下是否置顶
     sound_enabled: bool = True      # 正式提醒时是否播放提示音
     eye_care_enabled: bool = True   # 启用护眼提醒（总开关）
+    away_reset_seconds: int = 300   # 键鼠空闲多久视为“离开休息过”（重置周期）
     mask_theme: str = "teal"        # 遮罩颜色主题（mask_theme.THEMES 键或 custom）
     mask_custom_color: str = ""     # 自定义主题色（#RRGGBB，仅 custom 时生效）
     volume: int = 80                # 提示音音量（0-100，默认 80，永不为 0）
@@ -97,6 +98,8 @@ class AppConfig:
         cfg.pet_character = str(cfg.pet_character).strip() or "yier"
         cfg.eye_character = str(cfg.eye_character).strip() or "yier"
         cfg.eye_care_enabled = bool(cfg.eye_care_enabled)
+        cfg.away_reset_seconds = min(
+            max(60, _to_int(cfg.away_reset_seconds, 300)), 3600)
         from mask_theme import THEMES
         cfg.mask_theme = (cfg.mask_theme if cfg.mask_theme in THEMES
                           else "teal")
